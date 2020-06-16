@@ -443,6 +443,13 @@
       "Repository": "CRAN",
       "Hash": "a555924add98c99d2f411e37e7d25e9f"
     },
+    "prettydoc": {
+      "Package": "prettydoc",
+      "Version": "0.3.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "93e5f52ccdf9ee91fd27a5e759339741"
+    },
     "prettyunits": {
       "Package": "prettyunits",
       "Version": "1.1.1",

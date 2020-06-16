@@ -19,7 +19,6 @@ The purpose of this document is to explore, visualize, and summarize the intra a
 
 ```{r read data}
 library(tidyverse)
-library(gghighlight)
 
 elisa <- read_csv("../data/5 ELISA data (updated).csv")
 ```
@@ -243,27 +242,18 @@ To get an idea of the inter-assay variation, I calculate three metrics from the 
 ```{r}
 inter_assay <- elisa %>%
   mutate(
-    Row = case_when(
-      Type == "Blank" ~ 1L,
-      Type == "Negative" ~ 6L,
-      Type == "Positive" ~ 7L,
-      TRUE ~ match(str_sub(Well, 1, 1), LETTERS[1:8])), 
+    Row = match(str_sub(Well, 1, 1), LETTERS[1:8]), 
     
     Column = case_when(
-      Type == "Blank" ~ 6L,
-      Type == "Negative" ~ 6L,
-      Type == "Positive" ~ 6L,
-      TRUE ~ as.integer(str_sub(Well, 2, 2))),
+      Well_replicate == "A" ~ str_sub(Well, 2, 2),
+      Well_replicate == "B" ~ str_sub(Well, 5, -1)),
     
-    Well = case_when(
-      Type == "Blank" ~ "Blank wells",
-      Type == "Positive" ~ "Positive wells",
-      TRUE ~ Well)
+    Column = as.integer(Column)
   ) %>%
   
-  group_by(Plate, Time, Plate_replicate, Type, Well, Column, Row) %>%
+  group_by(Plate, Time, Plate_replicate, Type, Column, Row) %>%
   summarize(Mean = mean(Abs)) %>%
-  group_by(Plate, Time, Type, Well, Column, Row) %>%
+  group_by(Plate, Time, Type, Column, Row) %>%
   summarize(Range = range(Mean),
             Percent_diff = Range / ((max(Mean) + min(Mean)) / 2) * 100,
             CV = sd(Mean) / mean(Mean) * 100)
