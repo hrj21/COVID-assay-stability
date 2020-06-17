@@ -8,7 +8,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dev = "svg")
 ```
 
 ## Purpose and scope
@@ -213,17 +213,21 @@ plot_point(intra_assay, CV)
 
 ## Calculating intra-assay variation for each sample type
 
-To summarize the intra-assay variation, I calculate the mean range, percentage difference, and % CV for each sample type, at each time point.
+To summarize the intra-assay variation, I calculate the mean range, percentage difference, and % CV for each sample type, at each time point. The means ± 1 standard deviation are shown.
 
-Note that for the positive control and the unknown samples, all three metrics decrease from 15 minutes to 30 minutes. This data does not contain the information needed however, to conclude if this increase in precision comes at the cost of reduced assay sensitivity (the ability to discriminate positive cases).
+Note that for the positive control and the unknown samples, all three metrics decrease from 15 minutes to 30 minutes to 45 minutes. This data does not contain the information needed however, to conclude if this increase in precision comes at the cost of reduced assay sensitivity (the ability to discriminate positive cases).
 
 ```{r, results = "asis"}
 knitr::kable(
   intra_assay %>%
-  group_by(Type, Time) %>%
-  summarize(across(Range:CV, mean)),
-  digits = 2
-  )
+      group_by(Type, Time) %>%
+      summarize(across(Range:CV, list("mean" = mean, "sd" = sd))) %>%
+      mutate(across(where(is.numeric), round, digits = 2)) %>%
+      mutate(Range = paste(Range_mean, "±", Range_sd),
+             Percent_diff = paste(Percent_diff_mean, "±", Percent_diff_sd),
+             CV = paste(CV_mean, "±", CV_sd)) %>%
+      select(Type, Time, Range, Percent_diff, CV)
+)
 ```
 
 ## Visualizing inter-assay variation
@@ -344,16 +348,20 @@ plot_point_inter(inter_assay, CV)
 
 ## Calculating inter-assay variation for each sample type
 
-To summarize the inter-assay variation, I calculate the mean range, percentage difference, and % CV for each sample type, at each time point.
+To summarize the inter-assay variation, I calculate the mean range, percentage difference, and % CV for each sample type, at each time point. The means ± 1 standard deviation are shown.
 
 Note that, just like with the intra-assay variability, for the positive control and the unknown samples, all three metrics decrease from 15 minutes to 30 minutes. This data does not contain the information needed however, to conclude if this increase in precision comes at the cost of reduced assay sensitivity (the ability to discriminate positive cases).
 
 ```{r}
 knitr::kable(
-  inter_assay %>%
-  group_by(Type, Time) %>%
-  summarize(across(Range:CV, mean)),
-  digits = 2
+      inter_assay %>%
+      group_by(Type, Time) %>%
+      summarize(across(Range:CV, list("mean" = mean, "sd" = sd))) %>%
+      mutate(across(where(is.numeric), round, digits = 2)) %>%
+      mutate(Range = paste(Range_mean, "±", Range_sd),
+             Percent_diff = paste(Percent_diff_mean, "±", Percent_diff_sd),
+             CV = paste(CV_mean, "±", CV_sd)) %>%
+      select(Type, Time, Range, Percent_diff, CV)
 )
 ```
 
@@ -364,7 +372,7 @@ Here are a summary of my thoughts based on this analysis:
 - the unnormalised and normalised measures of precision are higher than would be expected, but are perhaps not as high as initially thought
 - the estimated intra-assay CVs for serum samples are 8.48, 5.91, and 4.41 for 15, 30, and 45 minutes, respectively
 - the estimated inter-assay CVs for serum samples are 26.01, 19.19, 13.46 for 15, 30, and 45 minutes, respectively
-- it is expected that the inter-assay variation is greater than the inter-assay variation
+- it is expected that the inter-assay variation is greater than the intra-assay variation
 - the intra-assay CVs aren't actually that bad (though we must bear in mind these are calculated from only two readings per sample), being < 10
 - of greater concern are the inter-assay CVs, as 15 is a typical threshold
 - intra and inter-assay variation decreases from 15, to 30, to 45 minutes, but as we have not evaluated the assay's precision to discriminate at these incubation times, this cannot be used to justify longer incubation times alone
