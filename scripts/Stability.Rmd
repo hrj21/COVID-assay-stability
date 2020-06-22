@@ -236,7 +236,7 @@ In addition to evaluating the variation in absorbances within the same plate, it
 
 To get an idea of the inter-assay variation, I calculate three metrics from the absorbances (abs) of each unknown and negative control sample, $i$, in the same well across each plate replicate, $j$. Here, $n$ is the number of plate replicates.
 
-- the range, which is simply the difference between the largest and smallest value $$\textrm{range}_{ij} = max(abs_{i \in j}) - min1(abs_{i \in j})$$
+- the range, which is simply the difference between the largest and smallest value $$\textrm{range}_{ij} = max(abs_{i \in j}) - min(abs_{i \in j})$$
 
 - the percentage difference, which is the range expressed as a percentage of the mean $$\textrm{percentage difference}_{ij} = \frac{max(abs_{i \in j}) - min(abs_{i \in j})} 
 {\bigg(\frac{1}{n} \sum_{j=1}^{n} abs_{ij}\bigg)} \times 100$$
