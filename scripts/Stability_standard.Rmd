@@ -1,0 +1,321 @@
+---
+title: "SARS-Cov2 ELISA stability"
+author: "Hefin Rhys"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dev = "svg")
+```
+
+## Purpose and scope
+
+The purpose of this analysis is to examine the intra and inter-assay variability of the SARS-Cov2 S1 protein serology ELISA, run at the Crick. For this analysis, half of the plate was dispensed using manual pipetting, while the other half was dispensed using a robotic liquid handling system. Each plate has 7 serum samples known to have a range of reactivities, each of which has eight replicates (four dispensed manually, and four dispensed using the robot). Each plate also had two standard curves, created using known concentrations of the positive control anti-S1 antibody, CR3022. The experiment was repeated six times (six plates in total).
+
+## Plotting the standard curves
+
+I start by comparing the stability of the absorbance readings of the standard curves. The plot below shows the absorbance on the y axis against the concentration of the positive control antibody on the x axis. The colour indicates which plate the data belows to. Notice there are two lines for each plate, as each had two standard curves (these were both dispensed manually).
+
+We can see from this plot that the intra-assay variation (the discrepancy between lines of the same colour) is smaller than the inter-assay variation (the discrepancies between lines of different colours).
+
+```{r read data, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggalluvial)
+library(vegan)
+
+elisa <- read_csv("../data/Results compilation.csv")
+```
+
+```{r}
+library("scales")
+reverselog_trans <- function(base = exp(1)) {
+    trans <- function(x) -log(x, base)
+    inv <- function(x) base^(-x)
+    trans_new(paste0("reverselog-", format(base)), trans, inv, 
+              log_breaks(base = base), 
+              domain = c(1e-100, Inf))
+}
+
+elisa %>%
+  filter(Sample == "Standard", Concentration != 0) %>%
+  ggplot(aes(Concentration, Abs, col = Run, group = interaction(Plate_side, Run))) +
+  #facet_wrap(~ Plate_side, ncol = 2) +
+  geom_point() +
+  geom_line() +
+  scale_x_continuous(trans=reverselog_trans(10)) +
+  labs(x = "[CR3022] (μg/mL)", y = "Absorbance at 405nm (a.u.)") +
+  theme_bw()
+```
+
+## Calculating the intra and inter-assay % coefficients of variation for the standards
+
+I summarise this variability  by calculating the intra-assay % coefficients of variation (% CV), which is the standard deviation of a set of observations, expressed as a percentage of its mean. Below are the mean intra-assay % CVs across all the plates. The % CVs are relatively small, being below 10 (with the exception of the blanks).
+
+```{r}
+knitr::kable(
+  intra_standard_cv <- elisa %>%
+    filter(Sample == "Standard", Sample != "Negative") %>%
+    group_by(Run, Concentration) %>%
+    summarise(Mean = round(mean(Abs, na.rm = TRUE), 2),
+              CV = round(sd(Abs, na.rm = TRUE) / Mean * 100, 2)) %>%
+    group_by(Concentration) %>%
+    summarise(Mean = mean(Mean),
+              CV = mean(CV))
+)
+```
+
+Next, I do the same thing, but for the inter-assay % CVs. Notice that the inter-assay % CVs are larger than the intra-assay % CVs. This is to be expected, and is what we saw in the plot above. 
+
+```{r}
+knitr::kable(
+  inter_standard_cv <- elisa %>%
+    filter(Sample == "Standard", Sample != "Negative") %>%
+    group_by(Concentration) %>%
+    summarise(Mean = round(mean(Abs, na.rm = TRUE), 2),
+              CV = round(sd(Abs, na.rm = TRUE) / Mean * 100, 2))
+)
+```
+
+## Plotting the variation of serum samples
+
+Next, I analyse the variation in absorbances of the serum samples. We're interested in the intra and inter-assay variation, and whether manual or robotic dispensing induces more variation. To start with, I plot each sample against its intra-assay % CV. Each sample is coloured by its plate, and separate subplots are drawn for those dispensed manually vs those dispensed by robot. The intra-assay % CVs are largely comparable between plates, with the exception of samples D5, E4, and F3, which show large discrepancies between absorbances on a few of the plates.
+
+```{r}
+intra_cv <- elisa %>%
+  filter(Sample != "Standard" & Sample != "Negative") %>%
+  group_by(Run, Plate_side, Sample) %>%
+  summarise(Mean = mean(Abs, na.rm = TRUE),
+            CV = sd(Abs, na.rm = TRUE) / Mean * 100)
+
+intra_cv %>%
+  ggplot(aes(Sample, CV, col = Run)) +
+  facet_wrap(~ Plate_side) +
+  ylab("% CV") +
+  geom_point() +
+  theme_bw()
+```
+
+To directly compare the variability in samples dispensed manually vs those dispensed by robot, I redraw the same data, but draw separate subplots for each plate, and colour the data by how they were dispensed. Generally, the variation of manually-dispensed samples is comparable to those dispensed by robot. But there are unexplained instances where large discrepancies are introduced by the robot. This could be a tolerance issue, where the robot is failing where the sample has a smaller volume, or is more viscous.
+
+```{r}
+intra_cv %>%
+  ggplot(aes(Sample, CV, col = Plate_side)) +
+  facet_wrap(~ Run) +
+  geom_point() +
+  ylab("% CV") +
+  scale_colour_discrete(name = "Dispenser") +
+  theme_bw()
+```
+
+Next, I do the same thing for the inter-assay % CV. In the plot below, the sample name is shown on the x axis, against its inter-assay % CV on the y axis. The data are coloured by dispenser. On the whole, samples dispensed by the robot have a slightly lower % CV than those dispensed manually. Taken together, this suggests that while, within a plate, the robot may dispense discrepant volumes between the intra-assay replicates, its behaviour is consistent across plates. In contrast, manual dispensing is less likely to introduce discrepancies within a plate, but results in greater discrepancy between plates.
+
+```{r}
+inter_cv <- elisa %>%
+  filter(Sample != "Standard" & Sample != "Negative") %>%
+  group_by(Plate_side, Sample) %>%
+  summarise(Mean = mean(Abs, na.rm = TRUE),
+            CV = sd(Abs, na.rm = TRUE) / Mean * 100)
+
+inter_cv %>%
+  ggplot(aes(Sample, CV, col = Plate_side)) +
+  ylab("% CV") +
+  scale_colour_discrete(name = "Dispenser") +
+  geom_point(size = 3) +
+  theme_bw()
+```
+
+## Exploring the relationship between absorbance and % CV
+
+We have observed that the intra and inter-assay variation of a sample, depends on the absorbance values of that sample. I visualise this below, where I plot the mean, intra-assay absorbance value on the x axis, against % CV on the y axis. The data are coloured by their plate, and separate subplots are drawn for samples dispensed manually, and samples dispensed using the robot. Notice that as the mean absorbance value increases, so the % CV decreases.
+
+```{r}
+intra_cv %>%
+  ggplot(aes(Mean, CV, col = Run)) +
+  facet_wrap(~ Plate_side) +
+  geom_point() +
+  # geom_smooth(method = "lm", se = FALSE, col = "black") +
+  theme_bw()
+```
+
+The effect is even more stark when we plot the mean, inter-assay absorbances against % CVs.
+
+```{r}
+inter_cv %>%
+  ggplot(aes(Mean, CV, col = Plate_side)) +
+  facet_wrap(~ Plate_side) +
+  geom_point(size = 3) +
+  ylab("% CV") +
+  scale_colour_discrete(name = "Dispenser") +
+  # geom_smooth(method = "lm", se = FALSE, col = "black") +
+  theme_bw()
+```
+
+## Calculating the intra and inter-assay % CV for the serum samples
+
+Just like I did for the standards, I now summarise the % CVs for the serum samples, decomposing by whether they were manually or robotically dispensed. The table below shows the intra-assay % CVs. Notice that the manual dispensed samples had almost half the % CV of those robotically dispensed.
+
+```{r}
+knitr::kable(
+intra_cv %>%
+  group_by(Plate_side) %>%
+  summarise(Mean = mean(Mean),
+            CV = mean(CV)),
+digits = 2
+)
+```
+
+Below are the inter-assay % CVs. Notice that they are larger than the intra-assay % CVs (which is to be expected as more factors vary between days), and that the inter-assay % CV of the robotically-dispensed samples is smaller than the inter-assay % CV of the manually-dispensed samples.
+
+One word of caution about interpretting these % CVs: as we've seen that the % CV depends on the signal strength, the mean intra or inter-assay % CVs for any plate will depend on the absorbance and, therefore, the reactivity of the samples in that plate. 
+
+```{r}
+knitr::kable(
+inter_cv %>%
+  group_by(Plate_side) %>%
+  summarise(Mean = mean(Mean),
+            CV = mean(CV)),
+digits = 2
+)
+```
+
+## Comparing the stability of assay output
+
+While variation in the absorbance values is important to quantify, the most important measure of stability is whether the assay outputs the same conclusion for each sample, within and between plates. There are three possible outcomes for any one well in the assay:
+
+- detected
+- not detected
+- indeterminate
+
+which are determined as follows:
+
+let b = the mean absorbance of the blanks and negative controls
+
+let c = the mean absorbance of the positive controls (at 0.2μg/mL)
+
+then:
+
+- if the absorbance is <= (0.25 * c) + b, well is not detected
+- if the absorbance is > (0.35 * c) + b, well is detected
+- if the absorbance is between these thresholds, well is indeterminate
+
+To study the stability of these outcomes, I first calculate b and c for each individual plate, and categorise each well according to the above rules. To illustrate that the assay has a lower limit of detection higher than 0 μg/mL of the positive control antibody, I plot the standard curves, colouring by whether each well is assigned an outcome of detected, not detected, or indeterminate. I draw a grid of subplots, where the columns are separated by how the wells were dispensed, and the rows are separated by the plate. As you can see, the assay stuggles to consistently classify 0.022μg/mL of positive control antibody as detected. Above and below this value, however, the assay consistently classifies wells as either detected, or not detected.
+
+```{r}
+b <- elisa %>%
+  filter(Sample == "Negative" | Sample == "Blank") %>%
+  group_by(Run) %>%
+  summarize(b = mean(Abs))
+
+c <- elisa %>%
+  filter(Concentration == 0.2) %>%
+  group_by(Run) %>%
+  summarize(c = mean(Abs))
+
+elisa_result <- left_join(elisa, b %>% left_join(c)) %>%
+  mutate(t1 = (0.25 * c) + b,
+         t2 = (0.35 * c) + b,
+         Result = case_when(Abs <= t1 ~ "Not detected",
+                            Abs > t1 & Abs <= t2 ~ "Indeterminate",
+                            Abs > t2 ~ "Detected"))
+
+elisa_result %>%
+  filter(Sample == "Standard") %>%
+  ggplot(aes(Concentration, Abs, col = Result)) +
+  facet_grid(Run ~ Plate_side) +
+  geom_point() +
+  geom_line() +
+  scale_x_continuous(trans=reverselog_trans(10)) +
+  theme_bw()
+```
+
+Next, I look at the stability of these outcomes on the serum samples. I use a sankey plot to visualize this, where each ribbon corresponds to a single sample. The vertical bars indicate the different plates, and the colour indicates how each sample was classified in the previous plate. Separate sub plots are drawn for samples dispensed manually and those dispensed by robot. 
+
+We can read this plot going from left to right, as how each sample's classification changes (or stays the same) between different plates. We can see that there is certainly some shuffling occuring, where a sample in one plate is given one classification, but is given another in a different plate.
+
+```{r}
+elisa_result %>%
+  filter(Sample != "Standard", Sample != "Negative") %>%
+  select(Run, Result, Sample, Plate_side) %>%
+  group_by(Run, Sample) %>%
+  mutate(Well = interaction(Sample, row_number())) %>%
+  ggplot(aes(x = Run, stratum = Result, alluvium = Well, fill = Result)) +
+  facet_wrap(~ Plate_side) +
+  geom_flow(stat = "alluvium", lode.guidance = "frontback",
+            color = "darkgray") +
+  geom_stratum() +
+  theme_bw()
+```
+To visualise if samples dispensed manually are being classified differently from those being dispensed by robot, I redraw the same data, but this time draw a separate sub plot for each plate, and indicate differences in classification using the ribbons. The only plate in which there was perfect agreement beween manual and robot-dispensed samples, was test4.
+
+```{r}
+elisa_result %>%
+  filter(Sample != "Standard", Sample != "Negative") %>%
+  select(Run, Result, Sample, Plate_side) %>%
+  group_by(Plate_side, Sample) %>%
+  mutate(Well = interaction(Sample, row_number())) %>%
+  ggplot(aes(x = Plate_side, stratum = Result, alluvium = Well, fill = Result)) +
+  facet_wrap(~ Run) +
+  geom_flow(stat = "alluvium", lode.guidance = "frontback",
+            color = "darkgray") +
+  geom_stratum() +
+  theme_bw()
+```
+
+A quantitative way of expressing the differences is by using Jaccard's distance, which tells us the porportion of samples that don't agree across plates, or between dispensor. I start by calculating the Jaccard's distance between plates, separately for manually and robotically-dispensed samples. For example, the value in the top left of the first matrix tells us that for samples dispensed manually, 20% of the outcomes between plates test1 and test2 were discrepant. In some cases these between plate discrepancies are quite large (as high as 30.4% between test1 and test5 for manually-dispensed samples).
+
+```{r}
+split_by_plate_type <- elisa_result %>%
+  select(Run, Plate_side, Sample, Result) %>%
+  filter(Sample != "Standard", Sample != "Negative") %>%
+  group_by(Run) %>%
+  mutate(Row = row_number()) %>%
+  pivot_wider(#id_cols = c(Sample, Run, Row),
+    names_from = Run,
+    values_from = Result) %>%
+  group_by(Plate_side) %>%
+  group_split()
+
+names(split_by_plate_type) <- c("Manual", "Robot")
+
+imap(split_by_plate_type, function(.x, .y) {
+  select(.x, -Plate_side, -Sample, -Row) %>%
+    mutate(across(.fns = function(x) as.numeric(as.factor(x)))) %>% t() %>%
+    vegdist(method = "jaccard")
+})
+    
+```
+
+To make it easier to compare the discrepancies between dispensors, I calculate the Jaccard's distances between manual and robotically-dispensed samples within each plate. The discrepancies here are comparable to those within each plate. This seems to suggest that while there are differences in variability between manual and robotically-dispensed samples, this doesn't appear to translate into more variable assay outcomes.
+
+```{r}
+split_by_run <- elisa_result %>%
+  select(Run, Plate_side, Sample, Result) %>%
+  filter(Sample != "Standard", Sample != "Negative") %>%
+  group_by(Plate_side) %>%
+  mutate(Row = row_number()) %>%
+  pivot_wider(#id_cols = c(Sample, Run, Row),
+    names_from = Plate_side,
+    values_from = Result) %>%
+  group_by(Run) %>%
+  group_split()
+
+names(split_by_run) <- c("test1", "test2", "test3", "test4", "test5", "test6")
+
+imap(split_by_run, function(.x, .y) {
+  select(.x, -Run, -Sample, -Row) %>%
+    mutate(across(.fns = function(x) as.numeric(as.factor(x)))) %>% t() %>%
+    vegdist(method = "jaccard")
+})
+```
+
+## Conclusions
+
+In conclusion:
+
+- inter-assay variation is greater than intra-assay variation
+- dispensing samples using the robot results in higher intra-asay variation, but lower inter-assay variation, than manually-dispensed samples
+- as a consequence of variation in absorbance values, the assay can assign different outcomes to samples in the same plate, and between plates
+- the variation in outcomes does not appear to depend on the method of dispensing

@@ -1,0 +1,382 @@
+---
+title: "Stability of Crick assay, and comparison with ROCHE assay"
+author: "Hefin Rhys"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dev = "svg")
+```
+
+## Introduction
+
+The purpose of this analysis is to summarise:
+
+- the stability of the Crick S1 protein ELISA assay
+- the agreement between the Crick assay and the ROCHE assay
+
+To achieve this, 45 samples that tested positive and 40 samples that tested negative using the Roche assay, were run through the Crick ELISA assay. Each sample was run in duplicate within each plate, and the assay was repeated a total of 5 times. Note that, as the Crick assay has a sample capacity of 40 samples per plate, the Roche-positive samples were split into batches of 40 and 5.
+
+
+```{r read data}
+# load packages
+library(tidyverse)
+library(vegan)
+
+# read raw data
+pos_tib <- read_csv("../data/5 ELISA data (updated).csv")
+neg_tib <- read_csv("../data/ROCHE NEGATIVES_RESULTS.csv")
+
+# filter pos_tib to include the first plate at any time point that passed
+# (for neg_tib, all plates passed at 15 min)
+
+pos_tib <- pos_tib %>%
+  group_by(Plate, Time, Plate_replicate) %>% filter(Type == "Positive") %>% summarise(Pos_mean = mean(Abs)) %>%
+  mutate(Plate_QC = case_when(Pos_mean < 2 ~ "FAIL",
+                              Pos_mean >= 3 ~ "FAIL",
+                              TRUE ~ "PASS")) %>%
+  right_join(pos_tib) %>%
+  filter(Plate_QC == "PASS") %>%
+  ungroup() %>%
+  select(-Pos_mean, -Plate_QC, -Time)
+  
+```
+## Intra-assay variation
+
+```{r intra}
+intra_pos <- pos_tib %>%
+  filter(Type == "Unknown") %>%
+  group_by(Plate, Plate_replicate, Type, Well) %>%
+  summarize(CV = sd(Abs) / mean(Abs) * 100)
+
+intra_neg <- neg_tib %>%
+  filter(Type == "Unknown") %>%
+  group_by(Plate_replicate, Type, Well) %>%
+  summarize(CV = sd(Abs) / mean(Abs) * 100)
+```
+
+```{r eval=FALSE, include=FALSE}
+intra_pos %>%
+  ungroup() %>%
+  summarize(CV_mean = mean(CV), CV_sd = sd(CV)) %>%
+  mutate(across(where(is.numeric), round, digits = 2),
+         CV = paste(CV_mean, "±", CV_sd)) %>%
+  select(CV)
+```
+
+```{r eval=FALSE, include=FALSE}
+intra_neg %>%
+  ungroup() %>%
+  summarize(CV_mean = mean(CV), CV_sd = sd(CV)) %>%
+  mutate(across(where(is.numeric), round, digits = 2),
+         CV = paste(CV_mean, "±", CV_sd)) %>%
+  select(CV)
+```
+
+To summarise the intra-assay variation, the percentage coefficient of variation (% CV) is calculated for the duplicate readings of each sample, per plate. The mean % CV ± standard deviation for the Roche-positive and Roche-negative samples are shown below.
+
+```{r}
+knitr::kable(
+  tibble(`Roche result` = c("Positive", "Negative"),
+         `Intra-assay % CV` = c("9.45 ± 7.12", "8.53 ± 7.44"),
+         n = c(225, 200))
+)
+```
+
+## Inter-assay variation
+
+```{r intra2}
+inter_pos <- pos_tib %>%
+  filter(Type == "Unknown") %>%
+  group_by(Plate, Well) %>%
+  summarize(CV = sd(Abs) / mean(Abs) * 100)
+
+inter_neg <- neg_tib %>%
+  filter(Type == "Unknown") %>%
+  group_by(Type, Well) %>%
+  summarize(CV = sd(Abs) / mean(Abs) * 100)
+```
+
+```{r eval=FALSE, include=FALSE}
+inter_pos %>%
+  ungroup() %>%
+  summarize(CV_mean = mean(CV), CV_sd = sd(CV)) %>%
+  mutate(across(where(is.numeric), round, digits = 2),
+         CV = paste(CV_mean, "±", CV_sd)) %>%
+  select(CV)
+```
+
+```{r eval=FALSE, include=FALSE}
+inter_neg %>%
+  ungroup() %>%
+  summarize(CV_mean = mean(CV), CV_sd = sd(CV)) %>%
+  mutate(across(where(is.numeric), round, digits = 2),
+         CV = paste(CV_mean, "±", CV_sd)) %>%
+  select(CV)
+```
+
+To summarise the inter-assay variation, the percentage coefficient of variation (% CV) is calculated for readings of each sample, across all its plates. The mean % CV ± standard deviation for the Roche-positive and Roche-negative samples are shown below.
+
+```{r}
+knitr::kable(
+  tibble(`Roche result` = c("Positive", "Negative"),
+         `Inter-assay % CV` = c("12.93 ± 7.6", "16.4 ± 5.78"),
+         n = c(45, 40))
+)
+```
+
+## Inter-assay outcome stability and agreement with Roche assay
+
+In addition to summarizing the variability of absorbance measurements, it's also important to summarize the variability in well outcome. The Crick ELISA assay has three possible outcomes per well:
+
+- detected
+- not detected
+- indeterminate
+
+while the Roche assay has only detected and not detected. The table below shows the frequencies of each outcome across each plate replicate of the first 40 Roche-positive samples.
+
+```{r}
+pos_b <- pos_tib %>%
+  group_by(Plate, Plate_replicate) %>%
+  filter(Type == "Negative" | Type == "Blank") %>%
+  summarize(b = mean(Abs))
+
+pos_c <- pos_tib %>%
+  group_by(Plate, Plate_replicate) %>%
+  filter(Type == "Positive") %>%
+  summarize(c = mean(Abs))
+
+pos_well_outcomes <- left_join(pos_tib, pos_b) %>%
+  left_join(pos_c) %>%
+  mutate(
+    t1 = (0.25 * c) + b,
+    t2 = (0.35 * c) + b,
+    Outcome = case_when(
+      Abs <= t1 ~ "Not detected",
+      Abs > t1 & Abs <= t2 ~ "Indeterminate",
+      Abs > t2 ~ "Detected"
+    )
+  ) %>%
+  group_by(Plate, Plate_replicate, Well) %>%
+  select(-Abs,-b,-c,-t1,-t2) %>%
+  pivot_wider(names_from = Well_replicate, values_from = Outcome) %>%
+  mutate(
+    Outcome = case_when(
+      A == "Detected" & B == "Detected" ~ "Detected",
+      A == "Indeterminate" & B == "Indeterminate" ~ "Indeterminate",
+      A == "Not detected" & B == "Not detected" ~ "Not detected",
+      TRUE ~ "Discordant"
+    ),
+    Outcome = factor(
+      Outcome,
+      levels = c("Detected", "Indeterminate",
+                 "Not detected", "Discordant")
+    )
+  )
+
+P_1032_results <- pos_well_outcomes %>%
+  filter(Plate == "P_1032") %>%
+  group_by(Plate_replicate) %>%
+  filter(Type == "Unknown") %>%
+  count(Outcome, .drop = FALSE) %>%
+  pivot_wider(names_from = Outcome, values_from = n) %>%
+  ungroup()
+
+knitr::kable(P_1032_results)
+```
+
+
+The information in the table above is summarised below as a matrix of Jaccard distances. The Jaccard distance indicates the proportion of discordant wells between the well outcomes of two plates.
+
+```{r}
+P_1032_results %>%
+  select(-Plate_replicate) %>%
+  vegdist(method = "jaccard")
+```
+
+The same table and matrix are shown below but for the additional 5 Roche-positive samples.
+
+```{r}
+P_12345_results <- pos_well_outcomes %>%
+  filter(Plate == "P_12345") %>%
+  group_by(Plate_replicate) %>%
+  filter(Type == "Unknown", 
+         Well %in% c("A1/A7", "A2/A8", "A3/A9", "A4/A10", "A5/A11")) %>%
+  count(Outcome, .drop = FALSE) %>%
+  pivot_wider(names_from = Outcome, values_from = n) %>%
+  ungroup()
+
+knitr::kable(P_12345_results)
+```
+```{r}
+P_12345_results %>%
+  select(-Plate_replicate) %>%
+  vegdist(method = "jaccard")
+```
+
+Below, the percentage of wells of Roche-positive samples that are also Crick-positive, is summarised for each plate replicate (mean ± standard deviation of 81.33% ± 2.98).
+
+```{r pos_agreement}
+knitr::kable(
+pos_well_outcomes %>%
+  group_by(Plate, Plate_replicate) %>%
+  filter(Type == "Unknown") %>%
+  count(Outcome, .drop = FALSE) %>%
+  pivot_wider(names_from = Outcome, values_from = n) %>%
+  group_by(Plate_replicate) %>%
+  summarise(across(where(is.numeric), sum)) %>%
+  mutate(`Percentage agreement with Roche` = round(Detected / (Detected + Indeterminate + `Not detected` + Discordant) * 100, 2))
+)
+```
+
+The same is performed below for the Roche-negative samples. Note that all of these samples had an outcome of not detected by the Crick assay.
+
+```{r}
+neg_b <- neg_tib %>%
+  group_by(Plate_replicate) %>%
+  filter(Type == "Negative" | Type == "Blank") %>%
+  summarize(b = mean(Abs))
+
+neg_c <- neg_tib %>%
+  group_by(Plate_replicate) %>%
+  filter(Type == "Positive") %>%
+  summarize(c = mean(Abs))
+
+neg_well_outcomes <- left_join(neg_tib, neg_b) %>%
+  left_join(neg_c) %>%
+  mutate(
+    t1 = (0.25 * c) + b,
+    t2 = (0.35 * c) + b,
+    Outcome = case_when(
+      Abs <= t1 ~ "Not detected",
+      Abs > t1 & Abs <= t2 ~ "Indeterminate",
+      Abs > t2 ~ "Detected"
+    )
+  ) %>%
+  group_by(Plate_replicate, Well) %>%
+  select(-Abs,-b,-c,-t1,-t2) %>%
+  pivot_wider(names_from = Well_replicate, values_from = Outcome) %>%
+  mutate(
+    Outcome = case_when(
+      A == "Detected" & B == "Detected" ~ "Detected",
+      A == "Indeterminate" & B == "Indeterminate" ~ "Indeterminate",
+      A == "Not detected" & B == "Not detected" ~ "Not detected",
+      TRUE ~ "Discordant"
+    ),
+    Outcome = factor(
+      Outcome,
+      levels = c("Detected", "Indeterminate",
+                 "Not detected", "Discordant")
+    )
+  )
+
+neg_results <- neg_well_outcomes %>%
+  group_by(Plate_replicate) %>%
+  filter(Type == "Unknown") %>%
+  count(Outcome, .drop = FALSE) %>%
+  pivot_wider(names_from = Outcome, values_from = n) %>%
+  ungroup()
+
+knitr::kable(neg_results)
+```
+
+The Jaccard distances are therefore all 0.
+
+```{r}
+neg_results %>%
+  select(-Plate_replicate) %>%
+  vegdist(method = "jaccard")
+```
+
+The agreement with the Roche assay is 100%.
+
+```{r}
+knitr::kable(
+neg_well_outcomes %>%
+  group_by(Plate_replicate) %>%
+  filter(Type == "Unknown") %>%
+  count(Outcome, .drop = FALSE) %>%
+  pivot_wider(names_from = Outcome, values_from = n) %>%
+  summarise(across(where(is.numeric), sum)) %>%
+  mutate(`Percentage agreement with Roche` = round(`Not detected` / (Detected + Indeterminate + `Not detected` + Discordant) * 100, 2))
+)
+
+```
+
+## Accuracy, specificity and sensitivity
+
+The confusion matrix below shows the Crick assay outcomes (rows) against the Roche assay outcomes (columns). As the Crick assay has three possible outcomes but the Roche assay has only two, indeterminate samples from the Crick assay are classified as not detected for the calculations below.
+
+```{r}
+construct_confusion <- function(det, ind, not, dis) {
+  caret::confusionMatrix(factor(c(
+    rep("Detected", det),
+    rep("Indeterminate", ind),
+    rep("Not detected", not),
+    rep("Discordant", dis)
+  )),
+  factor(
+    c(rep("Detected", 45),
+      #rep("Indeterminate", 0),
+      rep("Not detected", 40)),
+    levels = c("Detected", "Indeterminate", "Not detected", "Discordant")
+  ),
+  positive = "Detected")
+}
+
+confusion_a <- construct_confusion(38, 3, 41, 3)
+confusion_b <- construct_confusion(38, 1, 41, 5)
+confusion_c <- construct_confusion(35, 1, 42, 7)
+confusion_d <- construct_confusion(36, 3, 42, 4)
+confusion_e <- construct_confusion(36, 3, 42, 4)
+
+knitr::kable(confusion_a$table, caption = "Confusion matrix for run A")
+knitr::kable(confusion_b$table, caption = "Confusion matrix for run B")
+knitr::kable(confusion_c$table, caption = "Confusion matrix for run C")
+knitr::kable(confusion_d$table, caption = "Confusion matrix for run D")
+knitr::kable(confusion_e$table, caption = "Confusion matrix for run E")
+```
+
+The mean ± standard deviation of the accuracy across all samples is 88.2% ± 3.0, considering the Roche result as a ground truth. Additional, per class, summary statistics for each run's confusion matrix are shown below where:
+
+- sensitivity is the proportion of samples the Roche assay assigned as this class, that the Crick assay also assigned to this class
+- specificity is the proportion of samples the Roche assay did not assign as this class, that the Crick assay also did not assign as this class
+- Precision is the proportion of samples the Crick assay assigned as this class, that the Roche assay also assigned to this class
+- F1 is the harmonic mean of sensitivity and precision for this class
+
+```{r}
+knitr::kable(confusion_a$byClass[c(1, 3), c(1, 2, 5, 7)], 
+             caption = "Metrics for run A")
+knitr::kable(confusion_b$byClass[c(1, 3), c(1, 2, 5, 7)], 
+             caption = "Metrics for run B")
+knitr::kable(confusion_c$byClass[c(1, 3), c(1, 2, 5, 7)], 
+             caption = "Metrics for run C")
+knitr::kable(confusion_d$byClass[c(1, 3), c(1, 2, 5, 7)], 
+             caption = "Metrics for run D")
+knitr::kable(confusion_e$byClass[c(1, 3), c(1, 2, 5, 7)], 
+             caption = "Metrics for run E")
+```
+
+```{r}
+confusion_array <- array(c(confusion_a$byClass[c(1, 3), c(1, 2, 5, 7)],
+                           confusion_b$byClass[c(1, 3), c(1, 2, 5, 7)],
+                           confusion_c$byClass[c(1, 3), c(1, 2, 5, 7)],
+                           confusion_d$byClass[c(1, 3), c(1, 2, 5, 7)],
+                           confusion_e$byClass[c(1, 3), c(1, 2, 5, 7)]),
+       dim = c( 2 , 4 , 5 ))
+
+confusion_mean <- round(apply(confusion_array, c(1, 2), mean), 2)
+confusion_sd <- round(apply(confusion_array, c(1, 2), sd), 2)
+
+knitr::kable(
+  matrix(paste(confusion_mean, "±",  confusion_sd), 2, 4) %>%
+  as.data.frame() %>%
+  `rownames<-`(c("Class: Detected", "Class: Not detected")) %>%
+  `colnames<-`(c("Sensitivity", "Specificity", "Precision", "F1")),
+  caption = "Mean ± standard deviation across all 5 runs"
+)
+```
+
